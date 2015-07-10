@@ -13,7 +13,7 @@ class PyGERT(object):
         """ Train the classifier. """
         burn_off = 2*self.filt_len - 1
 
-        if len(burn_off) > len(dh_train):
+        if burn_off > len(dh_train):
             print('Not enough samples!')
             return
         elif len(dh_train) != len(dv_train):
@@ -41,7 +41,7 @@ class PyGERT(object):
                 curr_min = x
             else:
                 if curr_max > curr_min:
-                    norm_peak.append(curr_max)
+                    norm_peak.append(curr_max[0])
                 curr_max = curr_min
 
         if len(norm_peak) < 2:
@@ -49,19 +49,26 @@ class PyGERT(object):
             return
 
         # --- STEP 3 ---
-        norm_peak = np.sort(norm_peak)
         g = GMM(n_components=2, n_iter=100)
         g.set_params(init_params='wc')
-        g.means_ = np.asarray([norm_peak[0], norm_peak[1]])  # Initial values
+
+        norm_peak = np.sort(norm_peak)
+        norm_peak = norm_peak.reshape(norm_peak.shape[0], 1)
+
+        init_vals = np.ndarray((2, 1))
+        init_vals[0] = norm_peak[0]
+        init_vals[1] = norm_peak[-1]
+        g.means_ = init_vals
+
         g.fit(norm_peak)  # Check if dimension mattered here
 
-        mu_fix = g.means_[1]
-        sigma_fix = np.sqrt(g.covars_[1])
-        prior_fix = g.weights_[1]
+        self.mu_fix = g.means_[0]
+        self.sigma_fix = np.sqrt(g.covars_[0])
+        self.prior_fix = g.weights_[0]
 
-        mu_bs = g.means_[0]
-        sigma_bs = np.sqrt(g.covars_[0])
-        prior_bs = g.weights_[0]
+        self.mu_bs = g.means_[1]
+        self.sigma_bs = np.sqrt(g.covars_[1])
+        self.prior_bs = g.weights_[1]
 
         # --- STEP 4 ---
         curr_max = dv_train[0]
@@ -83,9 +90,13 @@ class PyGERT(object):
             else:
                 if curr_max > curr_min:
                     ntr = norm_train[tmp_i]
-                    p_bs = (mlab.normpdf(ntr, mu_bs, sigma_bs) * prior_bs /
-                            (mlab.normpdf(ntr, mu_bs, sigma_bs) * prior_bs +
-                             mlab.normpdf(ntr, mu_fix, sigma_fix) * prior_fix))
+                    p_bs = (mlab.normpdf(ntr, self.mu_bs, self.sigma_bs) *
+                            self.prior_bs /
+                            (mlab.normpdf(ntr, self.mu_bs, self.sigma_bs) *
+                             self.prior_bs +
+                             mlab.normpdf(ntr, self.mu_fix, self.sigma_fix) *
+                             self.prior_fix))
+
                     if p_bs > 2/3:
                         feature = curr_max - curr_min - abs(curr_max + curr_min)
                         if feature > 0:
@@ -101,17 +112,24 @@ class PyGERT(object):
         if len(diff_max_min) < 2:
             print('Aborting')
             return
+
         diff_max_min = np.sort(diff_max_min)
-        g.means_ = np.asarray([diff_max_min[0], diff_max_min[1]])
+        diff_max_min = diff_max_min.reshape(diff_max_min.shape[0], 1)
+
+        init_vals = np.ndarray((2, 1))
+        init_vals[0] = diff_max_min[0]
+        init_vals[1] = diff_max_min[-1]
+        g.means_ = init_vals
+
         g.fit(diff_max_min)
 
-        self.mu_sac = g.means_[1]
-        self.sigma_sac = np.sqrt(g.covars_[1])
-        self.prior_sac = g.weights_[1]
+        self.mu_sac = g.means_[0]
+        self.sigma_sac = np.sqrt(g.covars_[0])
+        self.prior_sac = g.weights_[0]
 
-        self.mu_bli = g.means_[0]
-        self.sigma_bli = np.sqrt(g.covars_[0])
-        self.prior_bli = g.weights_[0]
+        self.mu_bli = g.means_[1]
+        self.sigma_bli = np.sqrt(g.covars_[1])
+        self.prior_bli = g.weights_[1]
 
         if self.sigma_sac == 0 or self.sigma_bli == 0 or self.sigma_fix == 0:
             print('Zero variance detected! Aborting...')
