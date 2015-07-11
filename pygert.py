@@ -19,7 +19,8 @@ class PyGERT(object):
         self.filt_len = 150
         stop_limit = 500 / self.srate
         wn1 = stop_limit / (self.srate/2)
-        self._filt_coef_b1 = sig.firwin(self.filt_len, wn1)
+        self._b1 = sig.firwin(self.filt_len, wn1)
+        self._z1 = sig.lfilter_zi(self._filt_coef_b1, 1)
 
     def run_training(self, train_time_s=60):
 
@@ -170,12 +171,22 @@ class PyGERT(object):
         self.is_trained = True
         self.just_trained = True
 
+    def get_sample(self):
+        sample = self._inlet.pull_sample()
+        sample, self._z1 = sig.lfilter(self._b1, 1, smp, axis=0, zi=self._zi)
+        return sample[0], sample[1]
+
+    def clear_queue(self):
+        while self._inlet.pull_sample(timeout=0.0)[0]:()
+
     def run_detection(self):
+        print('Starting online EOG event detection.')
         if self.is_trained:
 
             # 1. Clear lsl queue
+            self.clear_queue()
             # 2. Read new sample
-            # 3. Filter sample
+            eog_h, eog_v = self.get_sample()
             # 4.
             return 1
         else:

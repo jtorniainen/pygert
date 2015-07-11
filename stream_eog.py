@@ -14,6 +14,7 @@ def start_streaming():
 
     fs = 500.0
     idx = 0
+    print('Starting stream (Ctrl+c to stop)...')
     try:
         while True:
             outlet.push_sample([eog_h[idx], eog_v[idx]])
@@ -23,7 +24,7 @@ def start_streaming():
             time.sleep(1.0 / fs)
 
     except KeyboardInterrupt:
-        print('shutting down!')
+        print('\nStopping stream.')
 
 
 if __name__ == '__main__':
