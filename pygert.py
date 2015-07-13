@@ -19,8 +19,13 @@ class PyGERT(object):
         self.filt_len = 150
         stop_limit = 500 / self.srate
         wn1 = stop_limit / (self.srate/2)
+
         self._b1 = sig.firwin(self.filt_len, wn1)
-        self._z1 = sig.lfilter_zi(self._filt_coef_b1, 1)
+        self._z1_h = sig.lfilter_zi(self._b1, 1)
+        self._z1_v = sig.lfilter_zi(self._b1, 1)
+
+        self._eog_h_prev = 0
+        self._eog_v_prev = 0
 
     def run_training(self, train_time_s=60):
 
@@ -33,14 +38,13 @@ class PyGERT(object):
             chnk, t = self._inlet.pull_chunk()
             if chnk:
                 train_eog = np.vstack((train_eog, np.asarray(chnk)))
-            print('\t%d%%\r' % (100 * (train_eog.shape[0] / n)), end="")
+            # print('\t%d%%\r' % (100 * (train_eog.shape[0] / n)), end="")
 
-        train_eog = sig.filtfilt(self._filt_coef_b1, 1, train_eog, axis=0)
+        train_eog = sig.filtfilt(self._b1, 1, train_eog, axis=0)
 
         print('Data collected. Training classifier...')
 
         self._train(train_eog[:, 0], train_eog[:, 1])
-
 
     def _train(self, dh_train, dv_train):
         """ Train the classifier. """
@@ -169,26 +173,99 @@ class PyGERT(object):
             return
 
         self.is_trained = True
-        self.just_trained = True
+        self._just_trained = True
 
-    def get_sample(self):
-        sample = self._inlet.pull_sample()
-        sample, self._z1 = sig.lfilter(self._b1, 1, smp, axis=0, zi=self._zi)
-        return sample[0], sample[1]
+    def _get_sample(self):
+        sample, t = self._inlet.pull_sample(timeout=0)
+        if sample:
+            eog_h = float(sample[0])
+            eog_v = float(sample[1])
+            eog_h, self._z1_h = sig.lfilter(self._b1, 1, [eog_h], zi=self._z1_h)
+            eog_v, self._z1_v = sig.lfilter(self._b1, 1, [eog_v], zi=self._z1_v)
+            return eog_h, eog_v
+        else:
+            return None, None
 
-    def clear_queue(self):
-        while self._inlet.pull_sample(timeout=0.0)[0]:()
+    def _clear_lsl_queue(self):
+        while self._inlet.pull_sample(timeout=0.0)[0]:
+            pass
+
+    def _norm(self, x):
+        return np.sqrt(np.dot(x, x))
+
+    def detect(self, eog_h, eog_v):
+
+        diff_h = eog_h - self._eog_h_prev
+        diff_v = eog_v - self._eog_v_prev
+
+        self._eog_h_prev = eog_h
+        self._eog_v_prev = eog_v
+
+        if self._just_trained:
+            self.curr_vd_max = diff_v
+            self._diff_v_prev = diff_v
+            self._just_trained = False
+
+        if diff_v > self._diff_v_prev:
+            self.curr_vd_max = diff_v
+        self._diff_v_prev = diff_v
+        dmm = self.curr_vd_max - diff_v - abs(self.curr_vd_max + diff_v)
+
+        norm_d1 = self._norm([float(diff_h), float(diff_v)])
+
+        # norm_d2 = self._norm([]) do this later
+        # Some buffer stuff here with 2s (later)
+
+        # Compute likelihoods using asymmetric distributions.
+        if norm_d1 > self.mu_fix:  # likelihood of the fixation point
+            lh_fix = mlab.normpdf(norm_d1, self.mu_fix, self.sigma_fix)
+        else:
+            lh_fix = mlab.normpdf(self.mu_fix, self.mu_fix, self.sigma_fix)
+
+        if norm_d1 < self.mu_bs:  # likelihood of the blink-or-saccade
+            lh_bs = mlab.normpdf(norm_d1, self.mu_bs, self.sigma_bs)
+        else:
+            lh_bs = mlab.normpdf(self.mu_bs, self.mu_bs, self.sigma_bs)
+
+        if dmm > self.mu_sac:   # likelihood (dmm) of the saccade
+            lh_sac = mlab.normpdf(dmm, self.mu_sac, self.sigma_sac)
+        else:
+            lh_sac = mlab.normpdf(self.mu_sac, self.mu_sac, self.sigma_sac)
+
+        if dmm < self.mu_bli:  # likelihood (dmm) of the blink
+            lh_bli = mlab.normpdf(dmm, self.mu_bli, self.sigma_bli)
+        else:
+            lh_bli = mlab.normpdf(self.mu_bli, self.mu_bli, self.sigma_bli)
+
+        # Compute the posterior probabilities
+        # evidence of norm data, i.e. the normalization constant
+        evi_norm = lh_fix * self.prior_fix + lh_bs * self.prior_bs
+        # normalized probability for the sample to be a fixation point
+        pfn = lh_fix * self.prior_fix / evi_norm
+        # normalized probability for the sample to be a saccade or blink
+        psbn = 1 - pfn
+        # evidence (dmm), i.e. the normalization constant
+        evi_dmm = lh_sac * self.prior_sac + lh_bli * self.prior_bli
+        # normalized probability for the sample to be a blink
+        pbn = psbn * lh_bli * self.prior_bli / evi_dmm
+        # normalized probability for the sample to be a saccade
+        psn = psbn * lh_sac * self.prior_sac / evi_dmm
+        print('\t%0.2f\t%0.2f\t%0.2f' % (pfn, pbn, psn))
 
     def run_detection(self):
-        print('Starting online EOG event detection.')
+        print('Starting online EOG event detection (Ctrl+c to quit)')
+        self._clear_lsl_queue()  # Clear the incoming buffer
         if self.is_trained:
+            try:
+                while True:
+                    # 1. Read new sample
+                    eog_h, eog_v = self._get_sample()
+                    # 2. Perform detection
+                    if eog_h and eog_v:
+                        self.detect(eog_h, eog_v)
 
-            # 1. Clear lsl queue
-            self.clear_queue()
-            # 2. Read new sample
-            eog_h, eog_v = self.get_sample()
-            # 4.
-            return 1
+            except KeyboardInterrupt:
+                print('\nDetection stopped.')
         else:
             print('Train the system first!')
             return None
@@ -198,6 +275,7 @@ class PyGERT(object):
 def test_run():
     pg = PyGERT()
     pg.run_training()
+    pg.run_detection()
 
 if __name__ == '__main__':
     test_run()
