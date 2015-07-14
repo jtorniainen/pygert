@@ -16,11 +16,11 @@ class PyGERT(object):
             self.srate = self._stream_handle.nominal_srate()
 
         # Configure filters
-        self.filt_len = 150
+        filt_len = 150
         stop_limit = 500 / self.srate
         wn1 = stop_limit / (self.srate/2)
 
-        self._b1 = sig.firwin(self.filt_len, wn1)
+        self._b1 = sig.firwin(filt_len, wn1)
         self._z1_h = sig.lfilter_zi(self._b1, 1)
         self._z1_v = sig.lfilter_zi(self._b1, 1)
 
@@ -44,22 +44,18 @@ class PyGERT(object):
 
         print('Data collected. Training classifier...')
 
-        self._train(train_eog[:, 0], train_eog[:, 1])
+        training_ok = self._train(train_eog[:, 0], train_eog[:, 1])
+        if training_ok:
+            print('Training finished ok.')
+        else:
+            print('Training had errors, re-run.')
 
     def _train(self, dh_train, dv_train):
         """ Train the classifier. """
-        burn_off = 2*self.filt_len - 1
 
-        if burn_off > len(dh_train):
-            print('Not enough samples!')
-            return
-        elif len(dh_train) != len(dv_train):
+        if len(dh_train) != len(dv_train):
             print('Training vectors are of unequal lengths!')
-            return
-
-        # --- STEP 1 ---
-        dh_train = np.diff(dh_train[burn_off:])
-        dv_train = np.diff(dv_train[burn_off:])
+            return False
 
         # --- STEP 2 ---
         norm_train = np.zeros((len(dh_train), 1))
@@ -83,7 +79,7 @@ class PyGERT(object):
 
         if len(norm_peak) < 2:
             print('Not enough peaks (>=2) in the norm-vector. Aborting')
-            return
+            return False
 
         # --- STEP 3 ---
         g = GMM(n_components=2, n_iter=100)
@@ -111,10 +107,6 @@ class PyGERT(object):
         curr_max = dv_train[0]
         curr_min = dv_train[0]
         diff_max_min = []
-        time_diff = []
-        CURR_MIN = []
-        CURR_MAX = []
-        NTR = []
         tmp_i = 1
 
         for idx, dv in enumerate(dv_train):
@@ -138,17 +130,13 @@ class PyGERT(object):
                         feature = curr_max - curr_min - abs(curr_max + curr_min)
                         if feature > 0:
                             diff_max_min.append(feature)
-                            time_diff.append(idx)
-                            CURR_MAX.append(curr_max)
-                            CURR_MIN.append(curr_min)
-                            NTR.append(ntr)
 
                 curr_max = curr_min
 
         # --- STEP 5 ---
         if len(diff_max_min) < 2:
-            print('Aborting')
-            return
+            print('Not enough diff_max_min samples! Aborting')
+            return False
 
         diff_max_min = np.sort(diff_max_min)
         diff_max_min = diff_max_min.reshape(diff_max_min.shape[0], 1)
@@ -168,12 +156,14 @@ class PyGERT(object):
         self.sigma_bli = np.sqrt(g.covars_[1])
         self.prior_bli = g.weights_[1]
 
-        if self.sigma_sac == 0 or self.sigma_bli == 0 or self.sigma_fix == 0:
+        if np.equal(0, [self.sigma_sac, self.sigma_bli, self.sigma_bs,
+                        self.sigma_fix]).any():
             print('Zero variance detected! Aborting...')
-            return
+            return False
 
         self.is_trained = True
         self._just_trained = True
+        return True
 
     def _get_sample(self):
         sample, t = self._inlet.pull_sample(timeout=0)
@@ -193,7 +183,7 @@ class PyGERT(object):
     def _norm(self, x):
         return np.sqrt(np.dot(x, x))
 
-    def detect(self, eog_h, eog_v):
+    def _detect(self, eog_h, eog_v):
 
         diff_h = eog_h - self._eog_h_prev
         diff_v = eog_v - self._eog_v_prev
@@ -262,19 +252,19 @@ class PyGERT(object):
                     eog_h, eog_v = self._get_sample()
                     # 2. Perform detection
                     if eog_h and eog_v:
-                        self.detect(eog_h, eog_v)
+                        self._detect(eog_h, eog_v)
 
             except KeyboardInterrupt:
                 print('\nDetection stopped.')
         else:
             print('Train the system first!')
             return None
-        pass
 
 
 def test_run():
     pg = PyGERT()
     pg.run_training()
+    input('Pausing here (ENTER to continue)')
     pg.run_detection()
 
 if __name__ == '__main__':
