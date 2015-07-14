@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.mlab as mlab
 from midas.node import lsl
 import scipy.signal as sig
-import scipy.io as io
+
 
 class PyGERT(object):
     def __init__(self, stream_name='EOG'):
@@ -49,20 +49,6 @@ class PyGERT(object):
         print('Data collected. Training classifier...')
 
         training_ok = self._train(train_eog[:, 0], train_eog[:, 1])
-        if training_ok:
-            print('Training finished ok.')
-        else:
-            print('Training had errors, re-run.')
-
-    def offline_training(self, filename='train.mat'):
-
-        data = io.loadmat(filename)
-        eog_h = data['EOGh'][0]
-        eog_v = data['EOGh'][0]
-        eog_h = sig.filtfilt(self._b1, 1, eog_h)
-        eog_v = sig.filtfilt(self._b1, 1, eog_v)
-        training_ok = self._train(eog_h, eog_v)
-
         if training_ok:
             print('Training finished ok.')
         else:
@@ -197,12 +183,14 @@ class PyGERT(object):
         else:
             return None, None
 
+    def _filter_sample(self, eog_h, eog_v):
+        eog_h, self._z1_h = sig.lfilter(self._b1, 1, [eog_h], zi=self._z1_h)
+        eog_v, self._z1_v = sig.lfilter(self._b1, 1, [eog_v], zi=self._z1_v)
+        return eog_h, eog_v
+
     def _clear_lsl_queue(self):
         while self._inlet.pull_sample(timeout=0.0)[0]:
             pass
-
-    def _normpdf(self, x, mu, sigma):
-        return 1/(sigma*np.sqrt(2*np.pi))*np.exp(-1*(x-mu)**2/2*sigma**2)
 
     def _norm(self, x):
         return np.sqrt(np.dot(x, x))
@@ -265,6 +253,7 @@ class PyGERT(object):
         # normalized probability for the sample to be a saccade
         psn = psbn * lh_sac * self.prior_sac / evi_dmm
         print('\t%0.2f\t%0.2f\t%0.2f' % (pfn, pbn, psn))
+        return [float(pfn), float(psn), float(pbn)]
 
     def run_detection(self):
         print('Starting online EOG event detection (Ctrl+c to quit)')
@@ -288,7 +277,7 @@ class PyGERT(object):
 
 def test_run():
     pg = PyGERT()
-    pg.offline_training()
+    pg.run_training()
     input('Pausing here (ENTER to continue)')
     pg.run_detection()
 
