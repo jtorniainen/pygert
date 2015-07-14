@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.mlab as mlab
 from midas.node import lsl
 import scipy.signal as sig
-
+import scipy.io as io
 
 class PyGERT(object):
     def __init__(self, stream_name='EOG'):
@@ -26,6 +26,10 @@ class PyGERT(object):
 
         self._eog_h_prev = 0
         self._eog_v_prev = 0
+
+        # Experimental dbg outlet
+        info = lsl.StreamInfo('dbg', 'dbg', 2, 500, 'float32', '003')
+        self.outlet = lsl.StreamOutlet(info)
 
     def run_training(self, train_time_s=60):
 
@@ -50,8 +54,25 @@ class PyGERT(object):
         else:
             print('Training had errors, re-run.')
 
+    def offline_training(self, filename='train.mat'):
+
+        data = io.loadmat(filename)
+        eog_h = data['EOGh'][0]
+        eog_v = data['EOGh'][0]
+        eog_h = sig.filtfilt(self._b1, 1, eog_h)
+        eog_v = sig.filtfilt(self._b1, 1, eog_v)
+        training_ok = self._train(eog_h, eog_v)
+
+        if training_ok:
+            print('Training finished ok.')
+        else:
+            print('Training had errors, re-run.')
+
     def _train(self, dh_train, dv_train):
         """ Train the classifier. """
+
+        dh_train = np.diff(dh_train)
+        dv_train = np.diff(dv_train)
 
         if len(dh_train) != len(dv_train):
             print('Training vectors are of unequal lengths!')
@@ -180,6 +201,9 @@ class PyGERT(object):
         while self._inlet.pull_sample(timeout=0.0)[0]:
             pass
 
+    def _normpdf(self, x, mu, sigma):
+        return 1/(sigma*np.sqrt(2*np.pi))*np.exp(-1*(x-mu)**2/2*sigma**2)
+
     def _norm(self, x):
         return np.sqrt(np.dot(x, x))
 
@@ -252,6 +276,7 @@ class PyGERT(object):
                     eog_h, eog_v = self._get_sample()
                     # 2. Perform detection
                     if eog_h and eog_v:
+                        self.outlet.push_sample([eog_h, eog_v])
                         self._detect(eog_h, eog_v)
 
             except KeyboardInterrupt:
@@ -263,7 +288,7 @@ class PyGERT(object):
 
 def test_run():
     pg = PyGERT()
-    pg.run_training()
+    pg.offline_training()
     input('Pausing here (ENTER to continue)')
     pg.run_detection()
 
