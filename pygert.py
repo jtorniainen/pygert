@@ -7,6 +7,11 @@ import scipy.signal as sig
 
 class PyGERT(object):
     def __init__(self, stream_name='EOG'):
+        """ Initialize the PyGERT-object
+
+        Args:
+            stream_name <string>: name of the lsl stream to connect
+        """
 
         self.is_trained = False
 
@@ -32,6 +37,11 @@ class PyGERT(object):
         self.outlet = lsl.StreamOutlet(info)
 
     def run_training(self, train_time_s=60):
+        """ Runs the training with live data.
+
+        Args:
+            train_time_s <float>: size of the training segment in seconds.
+        """
 
         n = round(train_time_s * self.srate)
         train_eog = np.ndarray((0, 2))
@@ -55,7 +65,14 @@ class PyGERT(object):
             print('Training had errors, re-run.')
 
     def _train(self, dh_train, dv_train):
-        """ Train the classifier. """
+        """ Trains the probabilistic classifier.
+
+        Args:
+            dh_train <array_like>: horizontal EOG vector
+            dv_train <array_like>: vertical EOG vector
+        Returns:
+            training_succesful <boolean>: status of training
+        """
 
         dh_train = np.diff(dh_train)
         dv_train = np.diff(dv_train)
@@ -173,6 +190,7 @@ class PyGERT(object):
         return True
 
     def _get_sample(self):
+        """ Pulls and filters a single sample from the lsl stream. """
         sample, t = self._inlet.pull_sample(timeout=0)
         if sample:
             eog_h = float(sample[0])
@@ -184,18 +202,34 @@ class PyGERT(object):
             return None, None
 
     def _filter_sample(self, eog_h, eog_v):
+        """ Filters an EOG sample using the internal FIR-filter. """
         eog_h, self._z1_h = sig.lfilter(self._b1, 1, [eog_h], zi=self._z1_h)
         eog_v, self._z1_v = sig.lfilter(self._b1, 1, [eog_v], zi=self._z1_v)
         return eog_h, eog_v
 
     def _clear_lsl_queue(self):
+        """ Empty the LSL buffer. """
         while self._inlet.pull_sample(timeout=0.0)[0]:
             pass
 
     def _norm(self, x):
+        """ Calculates the norm of input vector
+
+        Args:
+            x <array_like>: Input vector
+        """
         return np.sqrt(np.dot(x, x))
 
     def _detect(self, eog_h, eog_v):
+        """ Runs the detection for a single sample
+
+        Args:
+            eog_h <float>: Horizontal EOG sample
+            eog_v <float>: Vertical EOG sample
+        Returns:
+            probabilities <list>: List of probabilities for sample belonging to
+                                  one of the events [fixation, saccade, blink]
+        """
 
         diff_h = eog_h - self._eog_h_prev
         diff_v = eog_v - self._eog_v_prev
@@ -256,6 +290,7 @@ class PyGERT(object):
         return [float(pfn), float(psn), float(pbn)]
 
     def run_detection(self):
+        """ Starts the online detection of EOG events. """
         print('Starting online EOG event detection (Ctrl+c to quit)')
         self._clear_lsl_queue()  # Clear the incoming buffer
         if self.is_trained:
@@ -276,6 +311,7 @@ class PyGERT(object):
 
 
 def test_run():
+    """ Some tests. """
     pg = PyGERT()
     pg.run_training()
     input('Pausing here (ENTER to continue)')
