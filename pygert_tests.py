@@ -3,6 +3,7 @@ import scipy.signal as sig
 from pygert import PyGERT
 import numpy as np
 
+
 def offline_test_package(train_file='train.mat', detect_file='online.mat'):
     pg = PyGERT()
 
@@ -107,4 +108,5 @@ def test_train_segments():
 
 if __name__ == '__main__':
     # test_train_fulldata()
-    test_train_segments()
+    # test_train_segments()
+    offline_test_package()
