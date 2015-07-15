@@ -10,7 +10,7 @@ class PyGERT(object):
         """ Initialize the PyGERT-object
 
         Args:
-            stream_name <string>: name of the lsl stream to connect
+            stream_name <string>: name of the lsl stream to connect to
         """
 
         self._is_trained = False
@@ -60,28 +60,12 @@ class PyGERT(object):
         else:
             print('Training had errors, re-run.')
 
-    def _train(self, dh_train, dv_train):
-        """ Trains the probabilistic classifier.
+    def _find_norm_peaks(self, norm_train):
+        """ Find peaks in the input vector.
 
         Args:
-            dh_train <array_like>: horizontal EOG vector
-            dv_train <array_like>: vertical EOG vector
-        Returns:
-            training_succesful <boolean>: status of training
+            norm_train <array_like>: a vector
         """
-
-        dh_train = np.diff(dh_train)
-        dv_train = np.diff(dv_train)
-
-        if len(dh_train) != len(dv_train):
-            print('Training vectors are of unequal lengths!')
-            return False
-
-        # --- STEP 2 ---
-        norm_train = np.zeros((len(dh_train), 1))
-        for i, (h, v) in enumerate(zip(dh_train, dv_train)):
-            norm_train[i] = np.sqrt(np.dot([h, v], [h, v]))
-
         curr_max = norm_train[0]
         curr_min = norm_train[0]
 
@@ -96,34 +80,15 @@ class PyGERT(object):
                 if curr_max > curr_min:
                     norm_peak.append(curr_max[0])
                 curr_max = curr_min
+        return(norm_peak)
 
-        if len(norm_peak) < 2:
-            print('Not enough peaks (>=2) in the norm-vector. Aborting')
-            return False
+    def _find_diff_max_min(self, dv_train, norm_train):
+        """ Find max-min values of dv peaks
 
-        # --- STEP 3 ---
-        g = GMM(n_components=2, n_iter=100)
-        g.set_params(init_params='wc')
-
-        norm_peak = np.sort(norm_peak)
-        norm_peak = norm_peak.reshape(norm_peak.shape[0], 1)
-
-        init_vals = np.ndarray((2, 1))
-        init_vals[0] = norm_peak[0]
-        init_vals[1] = norm_peak[-1]
-        g.means_ = init_vals
-
-        g.fit(norm_peak)  # Check if dimension mattered here
-
-        self.mu_fix = g.means_[0]
-        self.sigma_fix = np.sqrt(g.covars_[0])
-        self.prior_fix = g.weights_[0]
-
-        self.mu_bs = g.means_[1]
-        self.sigma_bs = np.sqrt(g.covars_[1])
-        self.prior_bs = g.weights_[1]
-
-        # --- STEP 4 ---
+        Args:
+            dv_train <array_like>: vector
+            norm_train <array_like: vector
+        """
         curr_max = dv_train[0]
         curr_min = dv_train[0]
         diff_max_min = []
@@ -152,6 +117,60 @@ class PyGERT(object):
                             diff_max_min.append(feature)
 
                 curr_max = curr_min
+        return diff_max_min
+
+    def _train(self, dh_train, dv_train):
+        """ Trains the probabilistic classifier.
+
+        Args:
+            dh_train <array_like>: horizontal EOG vector
+            dv_train <array_like>: vertical EOG vector
+        Returns:
+            training_succesful <boolean>: status of training
+        """
+
+        dh_train = np.diff(dh_train)
+        dv_train = np.diff(dv_train)
+
+        if len(dh_train) != len(dv_train):
+            print('Training vectors are of unequal lengths!')
+            return False
+
+        # --- STEP 2 ---
+        norm_train = np.zeros((len(dh_train), 1))
+        for i, (h, v) in enumerate(zip(dh_train, dv_train)):
+            norm_train[i] = np.sqrt(np.dot([h, v], [h, v]))
+
+        norm_peak = self._find_norm_peaks(norm_train)
+
+        if len(norm_peak) < 2:
+            print('Not enough peaks (>=2) in the norm-vector. Aborting')
+            return False
+
+        # --- STEP 3 ---
+        g = GMM(n_components=2, n_iter=100)
+        g.set_params(init_params='wc')
+
+        norm_peak = np.sort(norm_peak)
+        norm_peak = norm_peak.reshape(norm_peak.shape[0], 1)
+
+        init_vals = np.ndarray((2, 1))
+        init_vals[0] = norm_peak[0]
+        init_vals[1] = norm_peak[-1]
+        g.means_ = init_vals
+
+        g.fit(norm_peak)  # Check if dimension mattered here
+
+        self.mu_fix = g.means_[0]
+        self.sigma_fix = np.sqrt(g.covars_[0])
+        self.prior_fix = g.weights_[0]
+
+        self.mu_bs = g.means_[1]
+        self.sigma_bs = np.sqrt(g.covars_[1])
+        self.prior_bs = g.weights_[1]
+
+        # --- STEP 4 ---
+        diff_max_min = self._find_diff_max_min(dv_train, norm_train)
 
         # --- STEP 5 ---
         if len(diff_max_min) < 2:
@@ -295,7 +314,6 @@ class PyGERT(object):
                     eog_h, eog_v = self._get_sample()
                     # 2. Perform detection and print probabilities
                     if eog_h and eog_v:
-                        self.outlet.push_sample([eog_h, eog_v])
                         pr = self._detect(eog_h, eog_v)
                         print('\t%0.2f\t%0.2f\t%0.2f' % (pr[0], pr[1], pr[2]))
             except KeyboardInterrupt:
