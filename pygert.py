@@ -13,7 +13,7 @@ class PyGERT(object):
             stream_name <string>: name of the lsl stream to connect
         """
 
-        self.is_trained = False
+        self._is_trained = False
 
         if stream_name:  # This needs error handling!
             self._stream_handle = lsl.resolve_byprop('name', stream_name)[0]
@@ -31,10 +31,6 @@ class PyGERT(object):
 
         self._eog_h_prev = 0
         self._eog_v_prev = 0
-
-        # Experimental dbg outlet
-        info = lsl.StreamInfo('dbg', 'dbg', 2, 500, 'float32', '003')
-        self.outlet = lsl.StreamOutlet(info)
 
     def run_training(self, train_time_s=60):
         """ Runs the training with live data.
@@ -185,7 +181,7 @@ class PyGERT(object):
             print('Zero variance detected! Aborting...')
             return False
 
-        self.is_trained = True
+        self._is_trained = True
         self._just_trained = True
         return True
 
@@ -286,28 +282,26 @@ class PyGERT(object):
         pbn = psbn * lh_bli * self.prior_bli / evi_dmm
         # normalized probability for the sample to be a saccade
         psn = psbn * lh_sac * self.prior_sac / evi_dmm
-        print('\t%0.2f\t%0.2f\t%0.2f' % (pfn, pbn, psn))
         return [float(pfn), float(psn), float(pbn)]
 
     def run_detection(self):
         """ Starts the online detection of EOG events. """
         print('Starting online EOG event detection (Ctrl+c to quit)')
         self._clear_lsl_queue()  # Clear the incoming buffer
-        if self.is_trained:
+        if self._is_trained:
             try:
                 while True:
                     # 1. Read new sample
                     eog_h, eog_v = self._get_sample()
-                    # 2. Perform detection
+                    # 2. Perform detection and print probabilities
                     if eog_h and eog_v:
                         self.outlet.push_sample([eog_h, eog_v])
-                        self._detect(eog_h, eog_v)
-
+                        pr = self._detect(eog_h, eog_v)
+                        print('\t%0.2f\t%0.2f\t%0.2f' % (pr[0], pr[1], pr[2]))
             except KeyboardInterrupt:
                 print('\nDetection stopped.')
         else:
             print('Train the system first!')
-            return None
 
 
 def test_run():
