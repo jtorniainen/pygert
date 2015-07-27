@@ -2,22 +2,27 @@ import scipy.io as io
 import scipy.signal as sig
 from pygert import PyGERT
 import numpy as np
+import time
 
 
 def offline_test_package(train_file='train.mat', detect_file='online.mat'):
-    pg = PyGERT()
+    prints('Starting offline test')
+    pg = PyGERT(stream_name=None)
 
+    prints('Loading data')
     data = io.loadmat(train_file)
     eog_h = data['EOGh'][0]
     eog_v = data['EOGh'][0]
+    prints('Filtering data')
     eog_h = sig.filtfilt(pg._b1, 1, eog_h)
     eog_v = sig.filtfilt(pg._b1, 1, eog_v)
+    prints('Training PyGERT-instance')
     training_ok = pg._train(eog_h, eog_v)
 
     if training_ok:
-        print('Training finished ok.')
+        prints('Training finished ok.')
     else:
-        print('Training had errors, re-run.')
+        prints('Training had errors, re-run.')
 
     # Save training params to file as well?
     print('   \tmu\tsd\tpri')
@@ -30,6 +35,7 @@ def offline_test_package(train_file='train.mat', detect_file='online.mat'):
     print('bs :\t%0.2f\t%0.2f\t%0.2f' % (pg.mu_bs,  pg.sigma_bs,
                                          pg.prior_bs))
 
+    prints('Running detection')
     data = io.loadmat(detect_file)
     eog_h = data['EOGh'][0]
     eog_v = data['EOGv'][0]
@@ -40,6 +46,11 @@ def offline_test_package(train_file='train.mat', detect_file='online.mat'):
         p = pg._detect(h, v)
         results = np.vstack((results, p))
     np.savetxt('pygert_results.csv', results, delimiter=',')
+    prints('Detection finished ok.')
+
+
+def prints(s):
+    print('[%d] %s' % (time.time(), s))
 
 
 def prepare_data():
