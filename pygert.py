@@ -41,6 +41,22 @@ class PyGERT(object):
         self._eog_h_prev2 = 0
         self._eog_v_prev2 = 0
 
+        # Buffers
+        self._MAX_SACCADE_LENGTH = .2
+        self._MAX_BLINK_LENGTH = .5
+        self._MIN_SACCADE_LENGTH = .01
+        self._MIN_BLINK_LENGTH = .2
+
+        buffer_len_saccade = round(self._MAX_SACCADE_LENGTH * self.srate)
+        buffer_len_blink = round(self._MAX_BLINK_LENGTH * self.srate)
+        self._buffer_norm_d2 = np.zeros(1, buffer_len_saccade)
+        self._buffer_eog_v2 = np.zeros(1, buffer_len_blink)
+        self._buffer_psn = np.zeros(1, buffer_len_saccade)
+
+        # Flags
+        self._blink_on = False
+        self._saccade_on = False
+
     def run_training(self, train_time_s=60):
         """ Runs the training with live data.
 
@@ -247,7 +263,7 @@ class PyGERT(object):
         """
         return np.sqrt(np.dot(x, x))
 
-    def _detect(self, eog_h, eog_v):
+    def _detect(self, eog_h1, eog_v1, eog_h2, eog_v2):
         """ Runs the detection for a single sample
 
         Args:
@@ -258,26 +274,37 @@ class PyGERT(object):
                                   one of the events [fixation, saccade, blink]
         """
 
-        diff_h = eog_h - self._eog_h_prev1
-        diff_v = eog_v - self._eog_v_prev1
+        diff_h1 = eog_h1 - self._eog_h_prev1
+        diff_v1 = eog_v1 - self._eog_v_prev1
 
-        self._eog_h_prev1 = eog_h
-        self._eog_v_prev1 = eog_v
+        diff_h2 = eog_h2 - self._eog_h_prev2
+        diff_v2 = eog_v2 - self._eog_v_prev2
+
+        self._eog_h_prev1 = eog_h1
+        self._eog_v_prev1 = eog_v1
+
+        self._eog_h_prev2 = eog_h2
+        self._eog_v_prev2 = eog_v2
 
         if self._just_trained:
-            self.curr_vd_max = diff_v
-            self._diff_v_prev = diff_v
+            self.curr_vd_max = diff_v1
+            self._diff_v_prev = diff_v1
             self._just_trained = False
 
-        if diff_v > self._diff_v_prev:
-            self.curr_vd_max = diff_v
-        self._diff_v_prev = diff_v
-        dmm = self.curr_vd_max - diff_v - abs(self.curr_vd_max + diff_v)
+        if diff_v1 > self._diff_v_prev:
+            self.curr_vd_max = diff_v1
+        self._diff_v_prev = diff_v1
+        dmm = self.curr_vd_max - diff_v1 - abs(self.curr_vd_max + diff_v1)
 
-        norm_d1 = self._norm([float(diff_h), float(diff_v)])
+        norm_d1 = self._norm([float(diff_h1), float(diff_v1)])
+        norm_d2 = self._norm([float(diff_h2), float(diff_v2)])
 
-        # norm_d2 = self._norm([]) do this later
         # Some buffer stuff here with 2s (later)
+        self._buffer_norm_d2 = np.roll(self._buffer_norm_d2, -1)
+        self._buffer_norm_d2[0][-1] = norm_d2
+
+        self._buffer_eog_v2 = np.roll(self._buffer_eog_v2, -1)
+        self._buffer_eog_v2[0][-1] = eog_v2
 
         # Compute likelihoods using asymmetric distributions.
         if norm_d1 > self.mu_fix:  # likelihood of the fixation point
@@ -313,6 +340,11 @@ class PyGERT(object):
         pbn = psbn * lh_bli * self.prior_bli / evi_dmm
         # normalized probability for the sample to be a saccade
         psn = psbn * lh_sac * self.prior_sac / evi_dmm
+
+        # Update probability buffer
+        self._buffer_psn = np.roll(self._buffer_psn, -1)
+        self._buffer_psn[0][-1] = psn
+
         return [float(pfn), float(psn), float(pbn)]
 
     def run_detection(self):
