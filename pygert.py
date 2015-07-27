@@ -6,7 +6,7 @@ import scipy.signal as sig
 
 
 class PyGERT(object):
-    def __init__(self, stream_name='EOG'):
+    def __init__(self, stream_name='EOG', srate=500):
         """ Initialize the PyGERT-object
 
         Args:
@@ -19,18 +19,27 @@ class PyGERT(object):
             self._stream_handle = lsl.resolve_byprop('name', stream_name)[0]
             self._inlet = lsl.StreamInlet(self._stream_handle)
             self.srate = self._stream_handle.nominal_srate()
+        else:
+            self.srate = srate  # Fix this later
 
         # Configure filters
         filt_len = 150
-        stop_limit = 500 / self.srate
-        wn1 = stop_limit / (self.srate/2)
+        stop_limit1 = 500 / self.srate
+        stop_limit2 = 40
+        wn1 = stop_limit1 / (self.srate/2)
+        wn2 = stop_limit2 / (self.srate/2)
 
         self._b1 = sig.firwin(filt_len, wn1)
+        self._b2 = sig.firwin(filt_len, wn2)
         self._z1_h = sig.lfilter_zi(self._b1, 1)
         self._z1_v = sig.lfilter_zi(self._b1, 1)
+        self._z2_h = sig.lfilter_zi(self._b2, 1)
+        self._z2_v = sig.lfilter_zi(self._b2, 1)
 
-        self._eog_h_prev = 0
-        self._eog_v_prev = 0
+        self._eog_h_prev1 = 0
+        self._eog_v_prev1 = 0
+        self._eog_h_prev2 = 0
+        self._eog_v_prev2 = 0
 
     def run_training(self, train_time_s=60):
         """ Runs the training with live data.
@@ -208,16 +217,19 @@ class PyGERT(object):
         """ Pulls and filters a single sample from the lsl stream. """
         sample, t = self._inlet.pull_sample(timeout=0)
         if sample:
-            eog_h = float(sample[0])
-            eog_v = float(sample[1])
-            eog_h, self._z1_h = sig.lfilter(self._b1, 1, [eog_h], zi=self._z1_h)
-            eog_v, self._z1_v = sig.lfilter(self._b1, 1, [eog_v], zi=self._z1_v)
-            return eog_h, eog_v
+            eog_h = [float(sample[0])]
+            eog_v = [float(sample[1])]
+            eog_h1, self._z1_h = sig.lfilter(self._b1, 1, eog_h, zi=self._z1_h)
+            eog_v1, self._z1_v = sig.lfilter(self._b1, 1, eog_v, zi=self._z1_v)
+            eog_h2, self._z2_h = sig.lfilter(self._b2, 1, eog_h, zi=self._z2_h)
+            eog_v2, self._z2_v = sig.lfilter(self._b2, 1, eog_v, zi=self._z2_v)
+            return eog_h1, eog_v1, eog_h2, eog_v2
         else:
-            return None, None
+            return None, None, None, None
 
     def _filter_sample(self, eog_h, eog_v):
         """ Filters an EOG sample using the internal FIR-filter. """
+        # This function is used for testing, do not remove!
         eog_h, self._z1_h = sig.lfilter(self._b1, 1, [eog_h], zi=self._z1_h)
         eog_v, self._z1_v = sig.lfilter(self._b1, 1, [eog_v], zi=self._z1_v)
         return eog_h, eog_v
@@ -246,11 +258,11 @@ class PyGERT(object):
                                   one of the events [fixation, saccade, blink]
         """
 
-        diff_h = eog_h - self._eog_h_prev
-        diff_v = eog_v - self._eog_v_prev
+        diff_h = eog_h - self._eog_h_prev1
+        diff_v = eog_v - self._eog_v_prev1
 
-        self._eog_h_prev = eog_h
-        self._eog_v_prev = eog_v
+        self._eog_h_prev1 = eog_h
+        self._eog_v_prev1 = eog_v
 
         if self._just_trained:
             self.curr_vd_max = diff_v
@@ -310,11 +322,11 @@ class PyGERT(object):
         if self._is_trained:
             try:
                 while True:
-                    # 1. Read new sample
-                    eog_h, eog_v = self._get_sample()
+                    # 1. Read next sample
+                    eog_h1, eog_v1, eog_h2, eog_v2 = self._get_sample()
                     # 2. Perform detection and print probabilities
-                    if eog_h and eog_v:
-                        pr = self._detect(eog_h, eog_v)
+                    if eog_h1 and eog_v1:
+                        pr = self._detect(eog_h1, eog_v1)
                         print('\t%0.2f\t%0.2f\t%0.2f' % (pr[0], pr[1], pr[2]))
             except KeyboardInterrupt:
                 print('\nDetection stopped.')
@@ -325,7 +337,7 @@ class PyGERT(object):
 def test_run():
     """ Some tests. """
     pg = PyGERT()
-    pg.run_training()
+    pg.run_training(train_time_s=40)
     input('Pausing here (ENTER to continue)')
     pg.run_detection()
 
