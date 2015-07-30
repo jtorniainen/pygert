@@ -6,6 +6,7 @@ import scipy.signal as sig
 
 
 class PyGERT(object):
+
     def __init__(self, stream_name='EOG', srate=500):
         """ Initialize the PyGERT-object
 
@@ -29,6 +30,8 @@ class PyGERT(object):
         wn1 = stop_limit1 / (self.srate/2)
         wn2 = stop_limit2 / (self.srate/2)
 
+        self._group_delay = 150
+
         self._b1 = sig.firwin(filt_len, wn1)
         self._b2 = sig.firwin(filt_len, wn2)
         self._z1_h = sig.lfilter_zi(self._b1, 1)
@@ -49,9 +52,9 @@ class PyGERT(object):
 
         buffer_len_saccade = round(self._MAX_SACCADE_LENGTH * self.srate)
         buffer_len_blink = round(self._MAX_BLINK_LENGTH * self.srate)
-        self._buffer_norm_d2 = np.zeros(1, buffer_len_saccade)
-        self._buffer_eog_v2 = np.zeros(1, buffer_len_blink)
-        self._buffer_psn = np.zeros(1, buffer_len_saccade)
+        self._norm_d2 = np.zeros(buffer_len_saccade)
+        self._eog_v2 = np.zeros(buffer_len_blink)
+        self._psn = np.zeros(buffer_len_saccade)
 
         # Flags
         self._blink_on = False
@@ -233,6 +236,7 @@ class PyGERT(object):
         """ Pulls and filters a single sample from the lsl stream. """
         sample, t = self._inlet.pull_sample(timeout=0)
         if sample:
+            self._n += 1
             eog_h = [float(sample[0])]
             eog_v = [float(sample[1])]
             eog_h1, self._z1_h = sig.lfilter(self._b1, 1, eog_h, zi=self._z1_h)
@@ -300,11 +304,11 @@ class PyGERT(object):
         norm_d2 = self._norm([float(diff_h2), float(diff_v2)])
 
         # Some buffer stuff here with 2s (later)
-        self._buffer_norm_d2 = np.roll(self._buffer_norm_d2, -1)
-        self._buffer_norm_d2[0][-1] = norm_d2
+        self._norm_d2 = np.roll(self._norm_d2, -1)
+        self._norm_d2[0][-1] = norm_d2
 
-        self._buffer_eog_v2 = np.roll(self._buffer_eog_v2, -1)
-        self._buffer_eog_v2[0][-1] = eog_v2
+        self._eog_v2 = np.roll(self._eog_v2, -1)
+        self._eog_v2[0][-1] = eog_v2
 
         # Compute likelihoods using asymmetric distributions.
         if norm_d1 > self.mu_fix:  # likelihood of the fixation point
@@ -341,11 +345,84 @@ class PyGERT(object):
         # normalized probability for the sample to be a saccade
         psn = psbn * lh_sac * self.prior_sac / evi_dmm
 
-        # Update probability buffer
-        self._buffer_psn = np.roll(self._buffer_psn, -1)
-        self._buffer_psn[0][-1] = psn
+        # Update saccade probability buffer
+        self._psn = np.roll(self._psn, -1)
+        self._psn[0][-1] = psn
+
+        self._fix_prob_mass += pfn
+        if psn > max([pfn, pbn]):
+            if self._saccade_samples == 0:
+                sac_on_start_n = self._n
+
+            self._saccade_on = True
+            self._saccade_samples += 1
+            self._saccade_prob = self._saccade_prob + psn
+        elif self._saccade_on:
+            self._saccade_terminated()
 
         return [float(pfn), float(psn), float(pbn)]
+
+    def _find_peak(self):
+        """ Utility function to find the first and last index of the peak. """
+        [peak_val, peak_idx] = max(self._norm_d2)
+        if peak_idx == 1:
+            peak_start_idx = 1
+        else:
+            for start_idx in np.arange(peak_idx - 1, 0, -1):
+                if self._norm_d2[start_idx] - self._norm_d2[start_idx + 1] > 0:
+                    break
+            peak_start_idx += 1
+
+        if peak_idx == self._norm_d2.size:
+            end_idx = self._norm_d2.size
+        else:
+            for end_idx in range(peak_idx + 1, self._norm_d2.size):
+                if self._norm_d2[end_idx] - self._norm_d2[end_idx - 1] > 0:
+                    break
+
+        end_idx -= 1
+
+        return start_idx, end_idx
+
+    def _saccade_terminated(self):
+        """ Deal with a saccade that just ended. """
+        if self._saccade_prob > self._MIN_SACCADE_LEN * self.srate:
+            peak_start_idx, peak_end_idx = self._find_peak()
+
+            saccade_dur = peak_end_idx - peak_start_idx
+            saccade_prob_mass = sum(self._psn[round(peak_start_idx):-1])
+            buf_start = round(max(1, self._n - self._norm_d2.size))
+            saccade_start_n = buf_start + peak_start_idx - self._group_delay - 1
+
+            saccade_ok = True
+            if saccade_prob_mass < self._MIN_SACCADE_LEN * self.srate:
+                saccade_ok = False
+
+            if self._n_blink > 0:
+                if saccade_start_n / self.srate < BLI_START[-1] + BLI_DUR[-1]:
+                    saccade_ok = False
+
+            if self._n_sac > 0:
+                if self._fix_prob_mass < self._MIN_SACCADE_GAP * self.srate:
+                    saccade_ok = False
+
+                saccade_gap = (saccade_start_n / self.srate -
+                               (SAC_START[-1] + SAC_DUR[-1]))
+
+                if saccade_gap < self._MIN_SACCADE_GAP * self.srate:
+                    saccade_ok = False
+
+            if saccade_ok:
+                self._n_sac += 1
+                SAC_START[n_sac] = saccade_start_n / self.srate
+                SAC_DUR[n_sac] = saccade_dur / self.srate
+                SAC_PROB[n_sac] = self._saccade_prob / self._saccade_samples
+                self._fix_prob_mass = 0
+                sac_on_end_prev_n = self._n
+
+        self._saccade_on = False
+        self._saccade_samples = 0
+        self._saccade_prob = 0
 
     def run_detection(self):
         """ Starts the online detection of EOG events. """
