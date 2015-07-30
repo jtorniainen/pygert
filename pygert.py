@@ -351,9 +351,6 @@ class PyGERT(object):
 
         self._fix_prob_mass += pfn
         if psn > max([pfn, pbn]):
-            if self._saccade_samples == 0:
-                sac_on_start_n = self._n
-
             self._saccade_on = True
             self._saccade_samples += 1
             self._saccade_prob = self._saccade_prob + psn
@@ -399,7 +396,8 @@ class PyGERT(object):
                 saccade_ok = False
 
             if self._n_blink > 0:
-                if saccade_start_n / self.srate < BLI_START[-1] + BLI_DUR[-1]:
+                if saccade_start_n / self.srate < (self._BLI_START[-1] +
+                                                   self._BLI_DUR[-1]):
                     saccade_ok = False
 
             if self._n_sac > 0:
@@ -407,18 +405,19 @@ class PyGERT(object):
                     saccade_ok = False
 
                 saccade_gap = (saccade_start_n / self.srate -
-                               (SAC_START[-1] + SAC_DUR[-1]))
+                               (self._SAC_START[-1] + self._SAC_DUR[-1]))
 
                 if saccade_gap < self._MIN_SACCADE_GAP * self.srate:
                     saccade_ok = False
 
             if saccade_ok:
                 self._n_sac += 1
-                SAC_START[n_sac] = saccade_start_n / self.srate
-                SAC_DUR[n_sac] = saccade_dur / self.srate
-                SAC_PROB[n_sac] = self._saccade_prob / self._saccade_samples
+                self._SAC_START.append(saccade_start_n / self.srate)
+                self._SAC_DUR.append(saccade_dur / self.srate)
+                self._SAC_PROB.append(self._saccade_prob /
+                                      self._saccade_samples)
                 self._fix_prob_mass = 0
-                sac_on_end_prev_n = self._n
+                self._sac_on_end_prev_n = self._n
 
         self._saccade_on = False
         self._saccade_samples = 0
