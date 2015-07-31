@@ -30,7 +30,7 @@ class PyGERT(object):
         wn1 = stop_limit1 / (self.srate/2)
         wn2 = stop_limit2 / (self.srate/2)
 
-        self._group_delay = 150
+        self._group_delay = (filt_len - 1) / 2
 
         self._b1 = sig.firwin(filt_len, wn1)
         self._b2 = sig.firwin(filt_len, wn2)
@@ -47,14 +47,32 @@ class PyGERT(object):
         # Buffers
         self._MAX_SACCADE_LENGTH = .2
         self._MAX_BLINK_LENGTH = .5
-        self._MIN_SACCADE_LENGTH = .01
+        self._MIN_SACCADE_LEN = .01
         self._MIN_BLINK_LENGTH = .2
+        self._MIN_SACCADE_GAP = .1
 
         buffer_len_saccade = round(self._MAX_SACCADE_LENGTH * self.srate)
         buffer_len_blink = round(self._MAX_BLINK_LENGTH * self.srate)
         self._norm_d2 = np.zeros(buffer_len_saccade)
         self._eog_v2 = np.zeros(buffer_len_blink)
         self._psn = np.zeros(buffer_len_saccade)
+
+        self._fix_prob_mass = 0
+
+        self._saccade_samples = 0
+        self._saccade_prob = 0
+
+        self._n = 0
+        self._n_sac = 0
+        self._n_blink = 0
+
+        self._SAC_START = []
+        self._SAC_END = []
+        self._SAC_DUR = []
+        self._SAC_PROB = []
+
+        self._BLI_START = []
+        self._BLI_END = []
 
         # Flags
         self._blink_on = False
@@ -76,7 +94,7 @@ class PyGERT(object):
             chnk, t = self._inlet.pull_chunk()
             if chnk:
                 train_eog = np.vstack((train_eog, np.asarray(chnk)))
-            # print('\t%d%%\r' % (100 * (train_eog.shape[0] / n)), end="")
+            print('\t%d%%\r' % (100 * (train_eog.shape[0] / n)), end="")
 
         train_eog = sig.filtfilt(self._b1, 1, train_eog, axis=0)
 
@@ -305,10 +323,10 @@ class PyGERT(object):
 
         # Some buffer stuff here with 2s (later)
         self._norm_d2 = np.roll(self._norm_d2, -1)
-        self._norm_d2[0][-1] = norm_d2
+        self._norm_d2[-1] = norm_d2
 
         self._eog_v2 = np.roll(self._eog_v2, -1)
-        self._eog_v2[0][-1] = eog_v2
+        self._eog_v2[-1] = eog_v2
 
         # Compute likelihoods using asymmetric distributions.
         if norm_d1 > self.mu_fix:  # likelihood of the fixation point
@@ -347,7 +365,7 @@ class PyGERT(object):
 
         # Update saccade probability buffer
         self._psn = np.roll(self._psn, -1)
-        self._psn[0][-1] = psn
+        self._psn[-1] = psn
 
         self._fix_prob_mass += pfn
         if psn > max([pfn, pbn]):
@@ -361,14 +379,15 @@ class PyGERT(object):
 
     def _find_peak(self):
         """ Utility function to find the first and last index of the peak. """
-        [peak_val, peak_idx] = max(self._norm_d2)
+        peak_val = max(self._norm_d2)
+        peak_idx = np.argmax(self._norm_d2)
         if peak_idx == 1:
-            peak_start_idx = 1
+            start_idx = 1
         else:
             for start_idx in np.arange(peak_idx - 1, 0, -1):
                 if self._norm_d2[start_idx] - self._norm_d2[start_idx + 1] > 0:
                     break
-            peak_start_idx += 1
+            start_idx += 1
 
         if peak_idx == self._norm_d2.size:
             end_idx = self._norm_d2.size
@@ -434,7 +453,7 @@ class PyGERT(object):
                     eog_h1, eog_v1, eog_h2, eog_v2 = self._get_sample()
                     # 2. Perform detection and print probabilities
                     if eog_h1 and eog_v1:
-                        pr = self._detect(eog_h1, eog_v1)
+                        pr = self._detect(eog_h1, eog_v1, eog_h2, eog_v2)
                         print('\t%0.2f\t%0.2f\t%0.2f' % (pr[0], pr[1], pr[2]))
             except KeyboardInterrupt:
                 print('\nDetection stopped.')
