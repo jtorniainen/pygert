@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.mlab as mlab
 from midas.node import lsl
 import scipy.signal as sig
+import time
 
 
 class PyGERT(object):
@@ -381,16 +382,16 @@ class PyGERT(object):
         """ Utility function to find the first and last index of the peak. """
         peak_val = max(self._norm_d2)
         peak_idx = np.argmax(self._norm_d2)
-        if peak_idx == 1:
-            start_idx = 1
+        if peak_idx == 0:
+            start_idx = 0
         else:
             for start_idx in np.arange(peak_idx - 1, 0, -1):
                 if self._norm_d2[start_idx] - self._norm_d2[start_idx + 1] > 0:
                     break
             start_idx += 1
 
-        if peak_idx == self._norm_d2.size:
-            end_idx = self._norm_d2.size
+        if peak_idx == self._norm_d2.size - 1:
+            end_idx = self._norm_d2.size - 1
         else:
             for end_idx in range(peak_idx + 1, self._norm_d2.size):
                 if self._norm_d2[end_idx] - self._norm_d2[end_idx - 1] > 0:
@@ -402,6 +403,7 @@ class PyGERT(object):
 
     def _saccade_terminated(self):
         """ Deal with a saccade that just ended. """
+        print('%d SACCADE ENDED?'%time.time())
         if self._saccade_prob > self._MIN_SACCADE_LEN * self.srate:
             peak_start_idx, peak_end_idx = self._find_peak()
 
@@ -454,7 +456,7 @@ class PyGERT(object):
                     # 2. Perform detection and print probabilities
                     if eog_h1 and eog_v1:
                         pr = self._detect(eog_h1, eog_v1, eog_h2, eog_v2)
-                        print('\t%0.2f\t%0.2f\t%0.2f' % (pr[0], pr[1], pr[2]))
+                        # print('\t%0.2f\t%0.2f\t%0.2f' % (pr[0], pr[1], pr[2]))
             except KeyboardInterrupt:
                 print('\nDetection stopped.')
         else:
@@ -464,7 +466,7 @@ class PyGERT(object):
 def test_run():
     """ Some tests. """
     pg = PyGERT()
-    pg.run_training(train_time_s=40)
+    pg.run_training(train_time_s=60)
     input('Pausing here (ENTER to continue)')
     pg.run_detection()
 
