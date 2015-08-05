@@ -446,7 +446,9 @@ class PyGERT(object):
 
     def run_detection(self):
         """ Starts the online detection of EOG events. """
+
         print('Starting online EOG event detection (Ctrl+c to quit)')
+
         self._clear_lsl_queue()  # Clear the incoming buffer
         if self._is_trained:
             try:
@@ -456,7 +458,7 @@ class PyGERT(object):
                     # 2. Perform detection and print probabilities
                     if eog_h1 and eog_v1:
                         pr = self._detect(eog_h1, eog_v1, eog_h2, eog_v2)
-                        # print('\t%0.2f\t%0.2f\t%0.2f' % (pr[0], pr[1], pr[2]))
+                        print('\t%0.2f\t%0.2f\t%0.2f' % (pr[0], pr[1], pr[2]))
             except KeyboardInterrupt:
                 print('\nDetection stopped.')
         else:
