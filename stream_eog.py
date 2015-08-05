@@ -5,7 +5,7 @@ import time
 
 def start_streaming():
 
-    data = io.loadmat('test001.mat')
+    data = io.loadmat('full_set.mat')
     eog_h = data['EOGh'][0]
     eog_v = data['EOGv'][0]
 
