@@ -57,13 +57,13 @@ class PyGERT(object):
 
         # Buffers
         self._MAX_SACCADE_LENGTH = .2
-        self._MAX_BLINK_LENGTH = .5
+        self._MAX_BLINK_LEN = .5
         self._MIN_SACCADE_LEN = .01
-        self._MIN_BLINK_LENGTH = .2
+        self._MIN_BLINK_LEN = .2
         self._MIN_SACCADE_GAP = .1
 
         buffer_len_saccade = round(self._MAX_SACCADE_LENGTH * self.srate)
-        buffer_len_blink = round(self._MAX_BLINK_LENGTH * self.srate)
+        buffer_len_blink = round(self._MAX_BLINK_LEN * self.srate)
         self._norm_d2 = np.zeros(buffer_len_saccade)
         self._eog_v2 = np.zeros(buffer_len_blink)
         self._psn = np.zeros(buffer_len_saccade)
@@ -72,6 +72,9 @@ class PyGERT(object):
 
         self._saccade_samples = 0
         self._saccade_prob = 0
+
+        self._blink_samples = 0
+        self._blink_prob = 0
 
         self._n = 0
         self._n_sac = 0
@@ -84,6 +87,8 @@ class PyGERT(object):
 
         self._BLI_START = []
         self._BLI_END = []
+        self._BLI_DUR = []
+        self._BLI_PROB = []
 
         # Flags
         self._blink_on = False
@@ -105,7 +110,7 @@ class PyGERT(object):
             chnk, t = self._inlet.pull_chunk()
             if chnk:
                 train_eog = np.vstack((train_eog, np.asarray(chnk)))
-            print('\t%d%%\r' % (100 * (train_eog.shape[0] / n)), end="")
+            # print('\t%d%%\r' % (100 * (train_eog.shape[0] / n)), end="")
 
         train_eog = sig.filtfilt(self._b1, 1, train_eog, axis=0)
 
@@ -324,8 +329,8 @@ class PyGERT(object):
             self._diff_v_prev = diff_v1
             self._just_trained = False
 
-        if diff_v1 > self._diff_v_prev:
-            self.curr_vd_max = diff_v1
+        self.curr_vd_max = max([self.curr_vd_max, diff_v1])
+
         self._diff_v_prev = diff_v1
         dmm = self.curr_vd_max - diff_v1 - abs(self.curr_vd_max + diff_v1)
 
@@ -386,16 +391,63 @@ class PyGERT(object):
         elif self._saccade_on:
             self._saccade_terminated()
 
+        if pbn > max([pfn, psn]):
+            self._blink_on = True
+            self._blink_samples += 1
+            self._blink_prob += pbn
+
+        elif self._blink_on:
+            self._blink_terminated()
         return [float(pfn), float(psn), float(pbn)]
+
+    def _blink_terminated(self):
+        """ Compute the blink duration and starting times """
+        if self._blink_prob > self._MIN_BLINK_LEN / 4 * self.srate:
+            buffer_dvf2 = np.diff(self._eog_v2)
+            peak_val_dvf2 = max(buffer_dvf2)
+            peak_idx_dvf2 = np.argmax(buffer_dvf2)
+            for peak_start in np.arange(peak_idx_dvf2, 0, -1):
+                if buffer_dvf2[peak_start] < .1 * peak_val_dvf2:
+                    break
+
+            # calculate an estimated blink duration (in samples) assuming
+            # symmetric peak
+            peak_idx_vf2 = np.argmax(self._eog_v2)
+            blink_dur = 2 * (peak_idx_vf2 - peak_start)
+
+            # Final check to determine if this is an actual blink
+            if blink_dur > self._MIN_BLINK_LEN * self.srate:
+                # This is a real blink
+                self._n_blink += 1
+                buffer_start = round(max(1, self._n - self._MAX_BLINK_LEN *
+                                         self.srate))
+                self._BLI_START.append((buffer_start + peak_start -
+                                        self._group_delay) / self.srate)
+                self._BLI_DUR.append(blink_dur / self.srate)
+                self._BLI_PROB.append(self._blink_prob / self._blink_samples)
+
+            # Blinks form a sac-blink-sac sequence so remove the most recent
+            # saccade (the first "sac" in the sequence) if they overlap as it
+            # was not "real" saccade
+            if self._n_sac > 0 and self._n_blink > 0:
+                if self._BLI_START[-1] < (self._SAC_START[-1] +
+                                          self._SAC_DUR[-1]):
+                    self._SAC_START.pop()
+                    self._SAC_DUR.pop()
+                    self._SAC_PROB.pop()
+                    self._n_sac -= 1
+
+        self._blink_on = False
+        self._blink_samples = 0
+        self._blink_prob = 0
 
     def _find_peak(self):
         """ Utility function to find the first and last index of the peak. """
-        peak_val = max(self._norm_d2)
         peak_idx = np.argmax(self._norm_d2)
         if peak_idx == 0:
             start_idx = 0
         else:
-            for start_idx in np.arange(peak_id, 0, -1):
+            for start_idx in np.arange(peak_idx, 0, -1):
                 if self._norm_d2[start_idx] - self._norm_d2[start_idx + 1] > 0:
                     break
             start_idx += 1
@@ -413,7 +465,7 @@ class PyGERT(object):
 
     def _saccade_terminated(self):
         """ Process a saccade that just ended. """
-        print('%d SACCADE ENDED?'%time.time())
+        print('%d SACCADE ENDED?' % time.time())
         if self._saccade_prob > self._MIN_SACCADE_LEN * self.srate:
             peak_start_idx, peak_end_idx = self._find_peak()
 
