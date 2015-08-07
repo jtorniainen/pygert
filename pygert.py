@@ -412,7 +412,7 @@ class PyGERT(object):
         return start_idx, end_idx
 
     def _saccade_terminated(self):
-        """ Deal with a saccade that just ended. """
+        """ Process a saccade that just ended. """
         print('%d SACCADE ENDED?'%time.time())
         if self._saccade_prob > self._MIN_SACCADE_LEN * self.srate:
             peak_start_idx, peak_end_idx = self._find_peak()
