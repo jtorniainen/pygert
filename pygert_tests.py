@@ -1,3 +1,13 @@
+#!/usr/bin/env python3
+
+# Copyright 2014 Jari Torniainen <jari.torniainen@ttl.fi>
+# Finnish Institute of Occupational Health
+#
+# This code is released under the MIT License
+# http://opensource.org/licenses/mit-license.php
+#
+# Please see the file LICENSE for details.
+
 import scipy.io as io
 import scipy.signal as sig
 from pygert import PyGERT
@@ -35,6 +45,7 @@ def offline_test_package(train_file='train.mat', detect_file='online.mat'):
     print('bs :\t%0.2f\t%0.2f\t%0.2f' % (pg.mu_bs,  pg.sigma_bs,
                                          pg.prior_bs))
 
+    # TODO: This no longer works because _detect takes 4 samples
     prints('Running detection')
     data = io.loadmat(detect_file)
     eog_h = data['EOGh'][0]
