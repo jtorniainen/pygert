@@ -395,7 +395,7 @@ class PyGERT(object):
         if peak_idx == 0:
             start_idx = 0
         else:
-            for start_idx in np.arange(peak_idx - 1, 0, -1):
+            for start_idx in np.arange(peak_id, 0, -1):
                 if self._norm_d2[start_idx] - self._norm_d2[start_idx + 1] > 0:
                     break
             start_idx += 1
