@@ -45,6 +45,12 @@ def offline_test_package(train_file='train.mat', detect_file='online.mat'):
     print('bs :\t%0.2f\t%0.2f\t%0.2f' % (pg.mu_bs,  pg.sigma_bs,
                                          pg.prior_bs))
 
+    training_results = [pg.mu_sac, pg.sigma_sac, pg.prior_sac, pg.mu_bli,
+                        pg.sigma_bli, pg.prior_bli, pg.mu_fix, pg.sigma_fix,
+                        pg.prior_fix, pg.mu_bs, pg.sigma_bs, pg.prior_bs]
+    training_results = np.asarray(training_results)
+    np.savetxt('pygert_training.csv', training_results, delimiter=',')
+
     # TODO: This no longer works because _detect takes 4 samples
     prints('Running detection')
     data = io.loadmat(detect_file)
@@ -53,8 +59,8 @@ def offline_test_package(train_file='train.mat', detect_file='online.mat'):
 
     results = np.ndarray((0, 3))
     for h, v in zip(eog_h, eog_v):
-        h, v = pg._filter_sample(h, v)
-        p = pg._detect(h, v)
+        h1, v1, h2, v2 = pg._filter_sample(h, v)
+        p = pg._detect(h1, v1, h2, v2)
         results = np.vstack((results, p))
     np.savetxt('pygert_results.csv', results, delimiter=',')
     prints('Detection finished ok.')
