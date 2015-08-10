@@ -284,10 +284,10 @@ class PyGERT(object):
     def _filter_sample(self, eog_h, eog_v):
         """ Filters an EOG sample using the internal FIR-filter. """
         # This function is used for testing, do not remove!
-        eog_h1, self._z1_h = sig.lfilter(self._b1, 1, eog_h, zi=self._z1_h)
-        eog_v1, self._z1_v = sig.lfilter(self._b1, 1, eog_v, zi=self._z1_v)
-        eog_h2, self._z2_h = sig.lfilter(self._b2, 1, eog_h, zi=self._z2_h)
-        eog_v2, self._z2_v = sig.lfilter(self._b2, 1, eog_v, zi=self._z2_v)
+        eog_h1, self._z1_h = sig.lfilter(self._b1, 1, [eog_h], zi=self._z1_h)
+        eog_v1, self._z1_v = sig.lfilter(self._b1, 1, [eog_v], zi=self._z1_v)
+        eog_h2, self._z2_h = sig.lfilter(self._b2, 1, [eog_h], zi=self._z2_h)
+        eog_v2, self._z2_v = sig.lfilter(self._b2, 1, [eog_v], zi=self._z2_v)
         return eog_h1, eog_v1, eog_h2, eog_v2
 
     def _clear_lsl_queue(self):
@@ -451,7 +451,7 @@ class PyGERT(object):
         if peak_idx == 0:
             start_idx = 0
         else:
-            for start_idx in np.arange(peak_idx, 0, -1):
+            for start_idx in np.arange(peak_idx - 1, 0, -1):
                 if self._norm_d2[start_idx] - self._norm_d2[start_idx + 1] > 0:
                     break
             start_idx += 1
@@ -469,7 +469,7 @@ class PyGERT(object):
 
     def _saccade_terminated(self):
         """ Process a saccade that just ended. """
-        print('%d SACCADE ENDED?' % time.time())
+        # print('%d SACCADE ENDED?' % time.time())
         if self._saccade_prob > self._MIN_SACCADE_LEN * self.srate:
             peak_start_idx, peak_end_idx = self._find_peak()
 
