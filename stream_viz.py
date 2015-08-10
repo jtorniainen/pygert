@@ -1,3 +1,13 @@
+#!/usr/bin/env python3
+
+# Copyright 2014 Jari Torniainen <jari.torniainen@ttl.fi>
+# Finnish Institute of Occupational Health
+#
+# This code is released under the MIT License
+# http://opensource.org/licenses/mit-license.php
+#
+# Please see the file LICENSE for details.
+
 from lsltools.vis import Grapher
 from midas.node import lsl
 import sys
