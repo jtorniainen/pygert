@@ -284,9 +284,11 @@ class PyGERT(object):
     def _filter_sample(self, eog_h, eog_v):
         """ Filters an EOG sample using the internal FIR-filter. """
         # This function is used for testing, do not remove!
-        eog_h, self._z1_h = sig.lfilter(self._b1, 1, [eog_h], zi=self._z1_h)
-        eog_v, self._z1_v = sig.lfilter(self._b1, 1, [eog_v], zi=self._z1_v)
-        return eog_h, eog_v
+        eog_h1, self._z1_h = sig.lfilter(self._b1, 1, eog_h, zi=self._z1_h)
+        eog_v1, self._z1_v = sig.lfilter(self._b1, 1, eog_v, zi=self._z1_v)
+        eog_h2, self._z2_h = sig.lfilter(self._b2, 1, eog_h, zi=self._z2_h)
+        eog_v2, self._z2_v = sig.lfilter(self._b2, 1, eog_v, zi=self._z2_v)
+        return eog_h1, eog_v1, eog_h2, eog_v2
 
     def _clear_lsl_queue(self):
         """ Empty the LSL buffer. """
@@ -311,6 +313,8 @@ class PyGERT(object):
             probabilities <list>: List of probabilities for sample belonging to
                                   one of the events [fixation, saccade, blink]
         """
+
+        self._n += 1
 
         diff_h1 = eog_h1 - self._eog_h_prev1
         diff_v1 = eog_v1 - self._eog_v_prev1
