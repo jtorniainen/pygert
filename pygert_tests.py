@@ -51,7 +51,6 @@ def offline_test_package(train_file='train.mat', detect_file='online.mat'):
     training_results = np.asarray(training_results)
     np.savetxt('pygert_training.csv', training_results, delimiter=',')
 
-    # TODO: This no longer works because _detect takes 4 samples
     prints('Running detection')
     data = io.loadmat(detect_file)
     eog_h = data['EOGh'][0]
