@@ -11,9 +11,8 @@
 from sklearn.mixture import GMM
 import numpy as np
 import matplotlib.mlab as mlab
-from midas.node import lsl
 import scipy.signal as sig
-import time
+import pylsl as lsl
 
 
 class PyGERT(object):
